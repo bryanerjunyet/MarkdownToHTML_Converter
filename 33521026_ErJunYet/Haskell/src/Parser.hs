@@ -3,7 +3,7 @@
 -- | Implementation of a parser-combinator.
 module Parser where
 
-import           Control.Applicative
+import           Control.Applicative hiding (some, many)
 import           Data.Char           (isAlpha, isDigit, isLower, isSpace,
                                       isUpper)
 import           Instances           (ParseError (..), ParseResult (..),
@@ -43,6 +43,9 @@ char = Parser f
     f ""       = Error UnexpectedEof
     f (x : xs) = Result xs x
 
+char' :: Char -> Parser Char
+char' c = satisfy (== c)
+
 -- | Parse numbers as int until non-digit
 
 ---- >>> parse int "abc"
@@ -74,6 +77,19 @@ eof = Parser f
   where
     f "" = Result "" ()
     f x  = Error $ ExpectedEof x
+
+many :: Parser a -> Parser [a]
+many p = some p <|> pure []
+
+some :: Parser a -> Parser [a]
+some p = (:) <$> p <*> many p
+
+-- between :: Parser open -> Parser close -> Parser a -> Parser a
+-- between open close p = do
+--   open
+--   result <- p
+--   close
+--   return result
 
 -- | -------------------------------------------------
 -- | --------------- Satisfy parsers -----------------

@@ -3,8 +3,10 @@ module Assignment (markdownParser, convertADTHTML) where
 
 import           Data.Time.Clock  (getCurrentTime)
 import           Data.Time.Format (defaultTimeLocale, formatTime)
+import           Data.Char        (isDigit)
 import           Instances        (Parser (..))
-import           Parser           ()
+import           Parser           ( some, many, char, is, string, space, spaces1, noneof, satisfy )
+import           Control.Applicative hiding (some, many)
 
 -- Define the ADT for various markdown elements
 data ADT
@@ -51,14 +53,14 @@ parseHeading :: Parser ADT
 parseHeading = do
   hashes <- some (char '#')
   space
-  text <- many (noneOf "\n")
+  text <- many (noneof "\n")
   return $ Heading (length hashes) text
 
 -- Parse italic text (e.g., _italic_)
 parseItalic :: Parser ADT
 parseItalic = do
   char '_'
-  content <- some (noneOf "_")
+  content <- some (noneof "_")
   char '_'
   return $ Italic content
 
@@ -66,7 +68,7 @@ parseItalic = do
 parseBold :: Parser ADT
 parseBold = do
   string "**"
-  content <- some (noneOf "**")
+  content <- some (noneof "**")
   string "**"
   return $ Bold content
 
@@ -74,7 +76,7 @@ parseBold = do
 parseStrikethrough :: Parser ADT
 parseStrikethrough = do
   string "~~"
-  content <- some (noneOf "~~")
+  content <- some (noneof "~~")
   string "~~"
   return $ Strikethrough content
 
@@ -82,10 +84,10 @@ parseStrikethrough = do
 parseLink :: Parser ADT
 parseLink = do
   char '['
-  linkText <- many (noneOf "]")
+  linkText <- many (noneof "]")
   char ']'
   char '('
-  url <- many (noneOf ")")
+  url <- many (noneof ")")
   char ')'
   return $ Link linkText url
 
@@ -93,7 +95,7 @@ parseLink = do
 parseInlineCode :: Parser ADT
 parseInlineCode = do
   char '`'
-  code <- many (noneOf "`")
+  code <- many (noneof "`")
   char '`'
   return $ InlineCode code
 
@@ -110,16 +112,16 @@ parseBlockquote :: Parser ADT
 parseBlockquote = do
   char '>'
   space
-  content <- many (noneOf "\n")
+  content <- many (noneof "\n")
   return $ Blockquote [FreeText content]
 
 -- Parse code blocks (e.g., ```lang\ncode\n```)
 parseCodeBlock :: Parser ADT
 parseCodeBlock = do
   string "```"
-  lang <- many (noneOf "\n")
+  lang <- many (noneof "\n")
   char '\n'
-  code <- many (noneOf "`")
+  code <- many (noneof "`")
   string "```"
   return $ CodeBlock lang code
 
@@ -132,16 +134,17 @@ parseOrderedList = do
   items <- some parseMarkdownElement
   return $ OrderedList [items]
 
--- Parse images (e.g., ![alt text](url "caption"))
 parseImage :: Parser ADT
 parseImage = do
-  string "!["
-  alt <- many (noneOf "]")
-  string "]("
-  url <- many (noneOf " ")
-  char ' '
-  caption <- between (char '"') (char '"') (many (noneOf "\""))
-  char ')'
+  _ <- string "!["
+  alt <- many (noneof "]")
+  _ <- string "]("
+  url <- many (noneof " ")
+  _ <- spaces1
+  _ <- char '"'
+  caption <- many (noneof "\"")
+  _ <- char '"'
+  _ <- char ')'
   return $ Image alt url caption
 
 -- Parse tables (simple parser for now)
@@ -152,13 +155,13 @@ parseTable = do
 
 parseTableRow :: Parser [String]
 parseTableRow = do
-  cells <- many (noneOf "|")
+  cells <- many (noneof "|")
   return [cells]
 
 -- Parse any free text (non-special text)
 parseFreeText :: Parser ADT
 parseFreeText = do
-  text <- some (noneOf "\n")
+  text <- some (noneof "\n")
   return $ FreeText text
 
 -- Function to convert ADT to HTML string
