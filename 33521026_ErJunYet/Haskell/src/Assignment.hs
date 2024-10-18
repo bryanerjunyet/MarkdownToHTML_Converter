@@ -3,151 +3,390 @@ module Assignment (markdownParser, convertADTHTML, generateHTML) where
 
 import           Data.Time.Clock  (getCurrentTime)
 import           Data.Time.Format (defaultTimeLocale, formatTime)
-import           Data.Char        (isDigit, isAlpha, isSpace)
+import           Data.Char        (isDigit)
 import           Instances        (Parser (..), ParseResult (..), ParseError (..))
-import           Parser           ( some, many, char, is, string, space, spaces1, noneof, satisfy )
+import           Parser           ( some, many, is, string, inlineSpace, noneof, satisfy )
 import           Control.Applicative ((<|>), optional, empty)
 
--- Algebraic Data Type to represent parsed Markdown components
-data ADT 
-    = Heading Int String
-    | Paragraph [ADT]   -- Paragraph can contain inline text modifiers
-    | Bold String
-    | Italic String
-    | Strikethrough String
-    | Link String String  -- Link text and URL
-    | InlineCode String
-    | Image String String String  -- Alt text, URL, Caption
-    | Footnote Int String  -- Footnote number and reference text
-    | Blockquote [ADT]
-    | CodeBlock (Maybe String) String  -- Optional language and code content
-    | OrderedList [[ADT]]  -- A list of list items, each containing a list of ADT
-    | Table [[String]]  -- Table rows and columns
-    | FreeText String   -- Free text for any non-special Markdown content
+-- ==========================================================
+-- Data Types for Algebraic Data Types for Markdown document
+-- ==========================================================
+
+-- The Document type representing the entire Markdown document
+data Document 
+    = Document [Element]    -- A document consists of a list of elements
     deriving (Show, Eq)
 
--- Parsing a heading
-headingParser :: Parser ADT
-headingParser = do
-    level <- length <$> some (is '#')
-    _ <- is ' '  -- at least one space is required
-    content <- manyTill anyChar newline
-    return $ Heading level content
+-- Elements in the document are either block-level or paragraph-level
+data Element 
+    = ParagraphElement ParagraphElement -- Paragraph elements
+    | BlockElement BlockElement         -- Block elements
+    deriving (Show, Eq)
 
--- Parsing a paragraph (free text and inline modifiers)
-paragraphParser :: Parser ADT
-paragraphParser = do
-    content <- manyTill anyChar newline
-    return $ Paragraph [FreeText content]  -- FreeText wrapped in Paragraph
+-- Paragraph-level content consists of FreeText with possible modifiers
+data ParagraphElement
+    = Paragraph [FreeText]  -- Paragraphs contain FreeText
+    deriving (Show, Eq)
 
--- Parsing bold text (**bold**)
-boldParser :: Parser ADT
-boldParser = do
-    _ <- string "**"
-    content <- manyTill anyChar (try $ string "**")
-    return $ Bold content
+-- FreeText is either plain or modified text
+data FreeText
+    = PlainText PlainText               -- Plain text
+    | TextModifier TextModifier         -- Special Markdown content
+    deriving (Show, Eq)
 
--- Parsing italic text (_italic_)
-italicParser :: Parser ADT
-italicParser = do
-    _ <- is '_'
-    content <- manyTill anyChar (is '_')
-    return $ Italic content
+-- Plain text is non-special Markdown content
+data PlainText
+    = String String                     -- Non-special Markdown content
+    deriving (Show, Eq)
 
--- Parsing strikethrough text (~~strikethrough~~)
-strikethroughParser :: Parser ADT
-strikethroughParser = do
-    _ <- string "~~"
-    content <- manyTill anyChar (try $ string "~~")
-    return $ Strikethrough content
+-- Text modifiers include bold, italic, links, inline code, etc.
+data TextModifier
+    = Bold PlainText                    -- Bold text
+    | Italic PlainText                  -- Italic text
+    | Strikethrough PlainText           -- Strikethrough text
+    | Link PlainText PlainText          -- Link
+    | InlineCode PlainText              -- Inline code (e.g., `code`)
+    | FootNote Int                      -- Footnote
+    deriving (Show, Eq)
 
--- Parsing inline code (`code`)
-inlineCodeParser :: Parser ADT
-inlineCodeParser = do
-    _ <- is '`'
-    content <- manyTill anyChar (is '`')
-    return $ InlineCode content
+-- Block-level elements include headers, blockquotes, lists, tables, etc.
+data BlockElement
+    = Header Int [FreeText]                 -- Headers
+    | BlockQuote [ParagraphElement]         -- Blockquotes
+    | BlockCode PlainText PlainText         -- Code
+    | FootNoteReference Int PlainText  -- Footnote reference
+    | OrderedLists [OrderedListItem]             -- Ordered lists
+    | Table TableHeader [TableRow]          -- Tables
+    | Image PlainText PlainText PlainText   -- Images
+    deriving (Show, Eq)
 
--- Parsing a link ([link text](url))
-linkParser :: Parser ADT
-linkParser = do
-    _ <- is '['
-    linkText <- manyTill anyChar (is ']')
-    _ <- is '('
-    url <- manyTill anyChar (is ')')
-    return $ Link linkText url
+-- Ordered list items can be nested
+-- data OrderedLists
+--     = OrderedLists [OrderedListItem]      -- Each list item can have free text elements
 
--- Parsing an image (![alt text](url "caption"))
-imageParser :: Parser ADT
-imageParser = do
-    _ <- string "!["
-    altText <- manyTill anyChar (is ']')
-    _ <- is '('
-    url <- manyTill anyChar (is ' ')
-    caption <- manyTill anyChar (is ')')
-    return $ Image altText url caption
+data OrderedListItem 
+    = ListItem [FreeText]                 -- Each list item can have free text elements
+    | SubList [OrderedListItem]           -- Nested sublists
+    deriving (Show, Eq)
 
--- Parsing a blockquote (> blockquote)
-blockquoteParser :: Parser ADT
-blockquoteParser = do
+-- Table structures
+data TableHeader 
+    = TableHeader [TableCell]           -- Table header consists of table cells
+    deriving (Show, Eq)
+
+data TableRow 
+    = TableRow [TableCell]              -- Table row consists of table cells
+    deriving (Show, Eq)
+
+data TableCell 
+    = TableCell [FreeText]              -- Table cells consist of free text elements
+    deriving (Show, Eq)
+
+
+-- ==================================
+-- Parsing Markdown to ADT (Document)
+-- ==================================
+
+-- Main markdown parser
+markdownParser :: Parser Document
+markdownParser = do
+    elements <- many elementParser
+    return $ Document elements
+
+-- Parser for individual elements (blocks or paragraphs)
+elementParser :: Parser Element
+elementParser = (BlockElement <$> blockElementParser)
+            <|> (ParagraphElement <$> paragraphElementParser)
+
+-------------------- Block-level parsers --------------------
+
+-- Block-level element parser
+blockElementParser :: Parser BlockElement
+blockElementParser = headerParser
+                 <|> blockQuoteParser
+                 <|> blockCodeParser
+                 <|> footNoteReferenceParser
+                 <|> orderedListParser
+                 <|> tableParser
+                 <|> imageParser
+
+-- | Parser for both types of headers
+headerParser :: Parser BlockElement
+headerParser = plainHeaderParser <|> alternativeHeaderParser
+
+-- | Parses plain Markdown headers, like '# Header'
+plainHeaderParser :: Parser BlockElement
+plainHeaderParser = do
+    _ <- inlineSpace
+    level <- length <$> some (is '#')  -- Count the number of '#'
+    _ <- inlineSpace
+    content <- freeTextParser
+    return $ Header level [content]
+
+-- | Parses alternative Markdown headers, like 'Header' followed by '=====' or '-----'
+alternativeHeaderParser :: Parser BlockElement
+alternativeHeaderParser = do
+    content <- freeTextParser
+    _ <- newline
+    level <- (is '=' >> return 1) <|> (is '-' >> return 2)
+    return $ Header level [content]
+
+-- Parsing blockquotes (> quote)
+blockQuoteParser :: Parser BlockElement
+blockQuoteParser = do
     _ <- is '>'
-    content <- manyTill anyChar newline
-    return $ Blockquote [FreeText content]  -- Blockquote contains free text
+    content <- paragraphElementParser
+    return $ BlockQuote [content]
 
--- Parsing a code block (``` code ```)
-codeBlockParser :: Parser ADT
-codeBlockParser = do
+-- Parsing code blocks (```language\ncode```)
+blockCodeParser :: Parser BlockElement
+blockCodeParser = do
     _ <- string "```"
-    language <- optional (manyTill anyChar newline)
-    content <- manyTill anyChar (try $ string "```")
-    return $ CodeBlock language content
+    language <- optionalPlainText
+    code <- manyTill anyChar (try $ string "```")
+    return $ BlockCode (maybePlainText language) (String code)
 
--- Parsing an ordered list (1. item)
-orderedListParser :: Parser ADT
+footNoteReferenceParser :: Parser BlockElement
+footNoteReferenceParser = do
+    _ <- string "[^"
+    ref <- some digit
+    _ <- is ']'
+    content <- plainTextParser
+    return $ FootNoteReference (read ref) content
+
+-- Ordered list parser (1. item)
+orderedListParser :: Parser BlockElement
 orderedListParser = do
     items <- some orderedListItemParser
-    return $ OrderedList items
+    return $ OrderedLists items
 
--- Helper function to parse an ordered list item
-orderedListItemParser :: Parser [ADT]
+-- Parsing ordered list items
+orderedListItemParser :: Parser OrderedListItem
 orderedListItemParser = do
     _ <- some digit
     _ <- string ". "
-    content <- manyTill anyChar newline
-    return [FreeText content]
+    content <- freeTextParser
+    return $ ListItem [content]
 
--- Parsing a table (| col1 | col2 |)
-tableParser :: Parser ADT
+-- Table parser (| col1 | col2 |)
+tableParser :: Parser BlockElement
 tableParser = do
-    rows <- some tableRowParser
-    return $ Table rows
+    TableRow headerCells <- tableRowParser  -- Extract [TableCell] from TableRow
+    rows <- many tableRowParser
+    return $ Table (TableHeader headerCells) rows  -- Pass [TableCell] to TableHeader
 
--- Helper function to parse a table row
-tableRowParser :: Parser [String]
+-- Table row parser
+tableRowParser :: Parser TableRow
 tableRowParser = do
     _ <- is '|'
-    cells <- cellParser `sepBy` is '|'
+    cells <- tableCellParser `sepBy` is '|'
     _ <- is '|'
-    return cells
+    return $ TableRow cells
 
--- Helper function to parse a table cell
-cellParser :: Parser String
-cellParser = many (noneof "|")
+-- Table cell parser
+tableCellParser :: Parser TableCell
+tableCellParser = do
+    content <- freeTextParser
+    return $ TableCell [content]
 
--- Parsing free text (any non-special markdown text)
-freeTextParser :: Parser ADT
-freeTextParser = FreeText <$> manyTill anyChar newline
+-- Image parser (![alt text](url "caption"))
+imageParser :: Parser BlockElement
+imageParser = do
+    _ <- string "!["
+    altText <- plainTextParser
+    _ <- is ']'
+    _ <- is '('
+    url <- plainTextParser
+    caption <- optional plainTextParser
+    _ <- is ')'
+    return $ Image altText url (maybePlainText caption)
 
--- !!!!!!!!!
--- freeTextParser => textmodifier
--- plainTextParser => normalText
+-------------------- Paragraph-level parsers --------------------
 
--- Combined markdown parser
-markdownParser :: Parser ADT
-markdownParser = do
-    elements <- many (choice [headingParser, paragraphParser, boldParser, italicParser, strikethroughParser, linkParser, inlineCodeParser, imageParser, blockquoteParser, codeBlockParser, orderedListParser, tableParser, freeTextParser])
-    return $ Paragraph elements  -- Wrap everything inside a root Paragraph
+-- Paragraph parser
+paragraphElementParser :: Parser ParagraphElement
+paragraphElementParser = do
+    content <- some freeTextParser
+    return $ Paragraph content
 
+-- Free text parser (can include plain text or text modifiers)
+freeTextParser :: Parser FreeText
+freeTextParser = (TextModifier <$> textModifierParser)
+             <|> (PlainText <$> plainTextParser)
+
+-- Plain text parser
+plainTextParser :: Parser PlainText
+plainTextParser = String <$> many (noneof "*_~`[]()|")
+
+-- Text modifier parser (bold, italic, strikethrough, etc.)
+textModifierParser :: Parser TextModifier
+textModifierParser = boldParser
+                 <|> italicParser
+                 <|> strikethroughParser
+                 <|> linkParser
+                 <|> inlineCodeParser
+                 <|> footNoteParser
+
+-- Bold text parser (**bold**)
+boldParser :: Parser TextModifier
+boldParser = do
+    _ <- string "**"
+    content <- many (noneof "*")
+    _ <- string "**"
+    return $ Bold (String content)
+
+-- Italic text parser (_italic_)
+italicParser :: Parser TextModifier
+italicParser = do
+    _ <- is '_'
+    content <- many (noneof "_")
+    _ <- is '_'
+    return $ Italic (String content)
+
+-- Strikethrough text parser (~~text~~)
+strikethroughParser :: Parser TextModifier
+strikethroughParser = do
+    _ <- string "~~"
+    content <- many (noneof "~")
+    _ <- string "~~"
+    return $ Strikethrough (String content)
+
+-- Link parser ([text](url))
+linkParser :: Parser TextModifier
+linkParser = do
+    _ <- is '['
+    text <- many (noneof "]")
+    _ <- is ']'
+    _ <- is '('
+    url <- many (noneof ")")
+    _ <- is ')'
+    return $ Link (String text) (String url)
+
+-- Inline code parser (`code`)
+inlineCodeParser :: Parser TextModifier
+inlineCodeParser = do
+    _ <- is '`'
+    content <- many (noneof "`")
+    _ <- is '`'
+    return $ InlineCode (String content)
+
+footNoteParser :: Parser TextModifier
+footNoteParser = do
+    _ <- string "[^"
+    ref <- some digit
+    _ <- is ']'
+    return $ FootNote (read ref) 
+
+
+-- Optional plain text
+optionalPlainText :: Parser (Maybe PlainText)
+optionalPlainText = optional (String <$> many (noneof "\n"))
+
+-- Helper to handle Maybe PlainText
+maybePlainText :: Maybe PlainText -> PlainText
+maybePlainText = maybe (String "") id
+
+
+-- =============================
+-- Converting ADT to Full HTML
+-- =============================
+
+-- Main function to convert the parsed ADT into a complete HTML document
+generateHTML :: Document -> String
+generateHTML doc = 
+    "<!DOCTYPE html>\n" ++
+    "<html lang=\"en\">\n" ++
+    "  <head>\n" ++
+    "    <meta charset=\"UTF-8\">\n" ++
+    "    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n" ++
+    "    <title>Markdown to HTML</title>\n" ++
+    "  </head>\n" ++
+    "  <body>\n" ++
+    convertADTHTML 0 doc ++  -- Converts the Document to the body content with indentation level 0
+    "  </body>\n" ++
+    "</html>"
+
+-- Main function to convert the parsed ADT into HTML body content with indentation level
+convertADTHTML :: Int -> Document -> String
+convertADTHTML level (Document elements) = unlines (map (elementToHTML level) elements)
+
+-- Convert elements to HTML with indentation level
+elementToHTML :: Int -> Element -> String
+elementToHTML level (ParagraphElement p) = paragraphToHTML level p
+elementToHTML level (BlockElement b) = blockElementToHTML level b
+
+-------------------- HTML Conversions --------------------
+
+-- Convert paragraph elements to HTML
+paragraphToHTML :: Int -> ParagraphElement -> String
+paragraphToHTML level (Paragraph texts) = indent level ++ "<p>" ++ concatMap freeTextToHTML texts ++ "</p>"
+
+-- Convert free text to HTML
+freeTextToHTML :: FreeText -> String
+freeTextToHTML (PlainText (String text)) = text
+freeTextToHTML (TextModifier modifier) = textModifierToHTML modifier
+
+-- Convert text modifiers to HTML
+textModifierToHTML :: TextModifier -> String
+textModifierToHTML (Bold (String text)) = "<strong>" ++ text ++ "</strong>"
+textModifierToHTML (Italic (String text)) = "<em>" ++ text ++ "</em>"
+textModifierToHTML (Strikethrough (String text)) = "<del>" ++ text ++ "</del>"
+textModifierToHTML (Link (String text) (String url)) = "<a href=\"" ++ url ++ "\">" ++ text ++ "</a>"
+textModifierToHTML (InlineCode (String text)) = "<code>" ++ text ++ "</code>"
+textModifierToHTML (FootNote num) = "<sup id=\"fnref" ++ show num ++ "\"><a href=\"#fn" ++ show num ++ "\">" ++ show num ++ "</a></sup>"
+
+-- Convert block elements to HTML with indentation level
+blockElementToHTML :: Int -> BlockElement -> String
+blockElementToHTML level (Header lvl content) = 
+    indent level ++ "<h" ++ show lvl ++ ">" ++ concatMap freeTextToHTML content ++ "</h" ++ show lvl ++ ">"
+blockElementToHTML level (BlockQuote paragraphs) = 
+    indent level ++ "<blockquote>\n" ++ concatMap (paragraphToHTML (level + 4)) paragraphs ++ indent level ++ "</blockquote>"
+blockElementToHTML level (BlockCode (String lang) (String code)) = 
+    indent level ++ "<pre><code class=\"" ++ lang ++ "\">" ++ code ++ "</code></pre>"
+blockElementToHTML level (FootNoteReference num (String text)) = 
+    indent level ++ "<li id=\"fn" ++ show num ++ "\"><p>" ++ text ++ " <a href=\"#fnref" ++ show num ++ "\">↩</a></p></li>"
+blockElementToHTML level (OrderedLists items) = 
+    indent level ++ "<ol>\n" ++ concatMap (orderedListItemToHTML (level + 4)) items ++ indent level ++ "</ol>"
+blockElementToHTML level (Table (TableHeader header) rows) = 
+    indent level ++ "<table>\n" ++
+    indent (level + 4) ++ "<thead>\n" ++
+    headerRowToHTML level header ++
+    indent (level + 4) ++ "</thead>\n" ++
+    indent (level + 4) ++ "<tbody>\n" ++
+    concatMap (tableRowToHTML level) rows ++ 
+    indent (level + 4) ++ "</tbody>\n" ++
+    indent level ++ "</table>"
+blockElementToHTML level (Image (String alt) (String url) (String caption)) = 
+    indent level ++ "<img src=\"" ++ url ++ "\" alt=\"" ++ alt ++ "\">\n" ++ "title=\"" ++ caption ++ "\"\n"
+
+-- Convert ordered list items to HTML
+orderedListItemToHTML :: Int -> OrderedListItem -> String
+orderedListItemToHTML level (ListItem content) = indent level ++ "<li>" ++ concatMap freeTextToHTML content ++ "</li>\n"
+orderedListItemToHTML level (SubList items) = indent level ++ "<ul>\n" ++ concatMap (orderedListItemToHTML (level + 4)) items ++ indent level ++ "</ul>\n"
+
+-- Convert table header rows to HTML
+headerRowToHTML :: Int -> [TableCell] -> String
+headerRowToHTML level cells = indent level ++ "<tr>" ++ concatMap (tableCellToHTML level) cells ++ "</tr>\n"
+
+-- Convert table rows to HTML
+tableRowToHTML :: Int -> TableRow -> String
+tableRowToHTML level (TableRow cells) = indent level ++ "<tr>" ++ concatMap (tableCellToHTML level) cells ++ "</tr>\n"
+
+-- Convert table cells to HTML
+tableCellToHTML :: Int -> TableCell -> String
+tableCellToHTML level (TableCell content) = indent level ++ "<td>" ++ concatMap freeTextToHTML content ++ "</td>"
+
+-------------------- HTML Utility Functions --------------------
+
+-- Helper function to create indentation based on the current level
+indent :: Int -> String
+indent level = replicate (level * 4) ' '  -- Indent with 4 spaces per level
+
+
+
+-- | -------------------------------------------------
+-- | --------------- Parser Utilities -----------------
+-- | -------------------------------------------------
 
 
 manyTill :: Parser a -> Parser b -> Parser [a]
@@ -174,64 +413,10 @@ try (Parser p) = Parser $ \input ->
 digit :: Parser Char
 digit = satisfy isDigit
 
-choice :: [Parser a] -> Parser a
-choice = foldr (<|>) empty
+-- choice :: [Parser a] -> Parser a
+-- choice = foldr (<|>) empty
 
 
-
-
--- Helper function to indent HTML content
-indent :: Int -> String -> String
-indent level content = replicate (level * 4) ' ' ++ content
-
--- Converts ADT into an HTML string
-convertADTHTML :: ADT -> String
-convertADTHTML adt = wrapHTML (generateHTML 0 adt)
-
--- Wraps generated HTML inside proper HTML structure
-wrapHTML :: String -> String
-wrapHTML body = unlines
-    [ "<!DOCTYPE html>"
-    , "<html lang=\"en\">"
-    , "<head>"
-    , "    <meta charset=\"UTF-8\">"
-    , "    <title>Markdown</title>"
-    , "</head>"
-    , "<body>"
-    , body
-    , "</body>"
-    , "</html>"
-    ]
-
--- Recursive function to generate HTML from ADT
-generateHTML :: Int -> ADT -> String
-generateHTML level (Heading n content) = indent level ("<h" ++ show n ++ ">" ++ content ++ "</h" ++ show n ++ ">")
-generateHTML level (Paragraph elements) = unlines (map (generateHTML (level + 1)) elements)
-generateHTML level (Bold content) = indent level ("<strong>" ++ content ++ "</strong>")
-generateHTML level (Italic content) = indent level ("<em>" ++ content ++ "</em>")
-generateHTML level (Strikethrough content) = indent level ("<del>" ++ content ++ "</del>")
-generateHTML level (Link text url) = indent level ("<a href=\"" ++ url ++ "\">" ++ text ++ "</a>")
-generateHTML level (InlineCode content) = indent level ("<code>" ++ content ++ "</code>")
-generateHTML level (Image alt url caption) = indent level ("<img src=\"" ++ url ++ "\" alt=\"" ++ alt ++ "\" title=\"" ++ caption ++ "\">")
-generateHTML level (Footnote n content) = indent level ("<sup><a id=\"fn" ++ show n ++ "ref\" href=\"#fn" ++ show n ++ "\">" ++ show n ++ "</a></sup>")
-generateHTML level (Blockquote elements) = indent level ("<blockquote>\n" ++ unlines (map (generateHTML (level + 1)) elements) ++ indent level "</blockquote>")
-generateHTML level (CodeBlock (Just lang) content) = indent level ("<pre><code class=\"language-" ++ lang ++ "\">\n" ++ content ++ "\n</code></pre>")
-generateHTML level (CodeBlock Nothing content) = indent level ("<pre><code>\n" ++ content ++ "\n</code></pre>")
-generateHTML level (OrderedList items) = indent level "<ol>\n" ++ concatMap (generateListItem (level + 1)) items ++ indent level "</ol>"
-generateHTML level (Table rows) = indent level "<table>\n" ++ unlines (map (generateTableRow (level + 1)) rows) ++ indent level "</table>"
-generateHTML level (FreeText content) = indent level ("<p>" ++ content ++ "</p>")
-
--- Helper function to generate HTML for a list item
-generateListItem :: Int -> [ADT] -> String
-generateListItem level item = indent level "<li>" ++ unlines (map (generateHTML (level + 1)) item) ++ indent level "</li>"
-
--- Helper function to generate HTML for a table row
-generateTableRow :: Int -> [String] -> String
-generateTableRow level row = indent level "<tr>\n" ++ concatMap (generateTableCell (level + 1)) row ++ indent level "</tr>"
-
--- Helper function to generate HTML for a table cell
-generateTableCell :: Int -> String -> String
-generateTableCell level content = indent level ("<td>" ++ content ++ "</td>")
 
 getTime :: IO String
 getTime = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" <$> getCurrentTime

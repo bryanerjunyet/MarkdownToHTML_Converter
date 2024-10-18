@@ -31,7 +31,7 @@ main = scotty 3000 $ do
         -- Convert the Text to String
         str = unpack requestBodyText
         -- Parse the Markdown string using 'markdownParser' and apply 'convertAllHTML'
-        converted_html = getResult (parse markdownParser str) convertADTHTML
+        converted_html = getResult (parse markdownParser str) (convertADTHTML 0)
 
     -- Respond with the converted HTML as JSON
     jsonResponse [("html", converted_html)]
