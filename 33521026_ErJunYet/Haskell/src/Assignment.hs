@@ -6,7 +6,7 @@ import           Data.Time.Format (defaultTimeLocale, formatTime)
 import           Data.Char        (isDigit)
 import           Instances        (Parser (..), ParseResult (..), ParseError (..))
 import           Parser           ( some, many, is, string, inlineSpace, noneof, satisfy )
-import           Control.Applicative ((<|>), optional, empty)
+import           Control.Applicative ((<|>), optional)
 
 -- ==========================================================
 -- Data Types for Algebraic Data Types for Markdown document
