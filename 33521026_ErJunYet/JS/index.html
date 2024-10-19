@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="/style.css">
 </head>
 
-<body>
+<body style="background-color: black; color: white;">
     <header>
         <h1>Markdown to HTML Converter</h1>
     </header>
@@ -16,18 +16,18 @@
     <main>
         <div id="container" style="display: flex; width: 100%;">
             <section id="input-section" style="flex: 1; padding-right: 10px;">
-                <h2>Enter Markdown:</h2>
-                <textarea id="markdown-input" placeholder="Enter your Markdown here..." style="width: 100%;"></textarea>
+                <h2 style="color: white;">Enter Markdown:</h2>
+                <textarea id="markdown-input" placeholder="Enter your Markdown here..." style="width: 100%; background-color: black; color: white;"></textarea>
             </section>
             <section id="output-section" style="flex: 1; padding-left: 10px;">
-                <h2>HTML Output:</h2>
-                <div id="html-output"></div>
-                <label><input type="checkbox" name="checkbox" checked>Render HTML</label>
+                <h2 style="color: white;">HTML Output:</h2>
+                <div id="html-output" style="color: white;"></div>
+                <label style="color: white;"><input type="checkbox" name="checkbox" checked>Render HTML</label>
             </section>
         </div>
     </main>
     <footer>
-        <p>Developed by Your Name</p>
+        <p>Developed by Er Jun Yet</p>
     </footer>
     <script src="./src/main.ts" type="module"></script>
 </body>

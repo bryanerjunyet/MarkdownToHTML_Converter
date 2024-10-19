@@ -104,8 +104,10 @@ function main() {
                     blocks.forEach((block) =>
                         hljs.highlightElement(block as HTMLElement),
                     );
+                    htmlOutput.style.whiteSpace = "normal";
                 } else {
                     htmlOutput.textContent = value.HTML;
+                    htmlOutput.style.whiteSpace = "pre-wrap";
                 }
             }
         });
