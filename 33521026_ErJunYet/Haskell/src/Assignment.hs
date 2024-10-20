@@ -10,6 +10,8 @@ import           Parser           ( char, some, many, is, string, space, inlineS
 import           Control.Applicative ((<|>), optional, empty)
 import           Control.Monad (void)
 
+-- This file contains code that was generated with the assistance of ChatGPT and Copilot.
+-- Some parts of the code were created or modified using these tools to improve efficiency and accuracy.
 -- ==========================================================
 -- Data Types for Algebraic Data Types for Markdown document
 -- ==========================================================

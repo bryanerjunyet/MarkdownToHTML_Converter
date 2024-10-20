@@ -10,6 +10,8 @@ import javascript from "highlight.js/lib/languages/javascript";
 import python from "highlight.js/lib/languages/python";
 import haskell from "highlight.js/lib/languages/haskell";
 
+// This file contains code that was generated with the assistance of ChatGPT and Copilot.
+// Some parts of the code were created or modified using these tools to improve efficiency and accuracy.
 // Load the languages from the unit for syntax highlighting!
 hljs.registerLanguage("javascript", javascript);
 hljs.registerLanguage("python", python);

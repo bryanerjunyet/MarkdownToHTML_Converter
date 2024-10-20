@@ -3,6 +3,8 @@
 module Main (main) where
 
 -- import Assignment (markdownParser)
+-- This file contains code that was generated with the assistance of ChatGPT and Copilot.
+-- Some parts of the code were created or modified using these tools to improve efficiency and accuracy.
 
 import           Assignment              (convertADTHTML, markdownParser, writeTextToFile)
 import           Data.Aeson              (object, (.=))
