@@ -1,4 +1,4 @@
-module Assignment (markdownParser, convertADTHTML, plainHeaderParser) where
+module Assignment (markdownParser, convertADTHTML, writeTextToFile) where
 
 
 import           Data.Time.Clock  (getCurrentTime)
@@ -6,28 +6,9 @@ import           Data.Time.Format (defaultTimeLocale, formatTime)
 import           Data.Char        (isDigit)
 import           Data.List        (dropWhile, intersperse)
 import           Instances        (Parser (..), ParseResult (..), ParseError (..))
-import           Parser           ( some, many, is, string, spaces, inlineSpace, noneof, satisfy, stringTok )
-import           Control.Applicative ((<|>), optional)
+import           Parser           ( char, some, many, is, string, space, inlineSpace, noneof, satisfy, stringTok )
+import           Control.Applicative ((<|>), optional, empty)
 import           Control.Monad (void)
-
-
-
--- parseDocumentElement :: Parser DocumentElements 
--- parseDocumentElement = BlockElement <$> parseBlockElements
---                     <|> InlineElement <$> parseInlineElements
---                     <|> ParagraphElement <$> parseParagraphElements
--- parseParagraphElements :: Parser Paragraphs
--- parseParagraphElements = parseParagraph
--- <> parseEmptyParagraph
--- parseParagraph :: Parser Paragraphs parseParagraph = Paragraph ‹$> some
--- (parseTextModifier <|› parsePlainTextDelimiter) <* endOfParagraph
--- parseEmptyParagraph :: Parser Paragraphs
--- parseEmptyParagraph = Paragraph <$> (is '\n' $>
--- ［）
--- endOfParagraph :: Parser
--- endofParagraph = (many (is '\n') $>
--- <*
--- eof) <| › (is '\n' $›
 
 -- ==========================================================
 -- Data Types for Algebraic Data Types for Markdown document
@@ -82,13 +63,8 @@ data BlockElement
     | Image PlainText PlainText PlainText   -- Images
     deriving (Show, Eq)
 
--- Ordered list items can be nested
--- data OrderedLists
---     = OrderedLists [OrderedListItem]      -- Each list item can have free text elements
-
 data OrderedListItem 
-    = ListItem [FreeText]                 -- Each list item can have free text elements
-    | SubList [OrderedListItem]           -- Nested sublists
+    = ListItem [FreeText] [OrderedListItem] -- Each list item can have free text elements and sublists
     deriving (Show, Eq)
 
 -- Table structures
@@ -143,7 +119,7 @@ plainHeaderParser :: Parser BlockElement
 plainHeaderParser = do
     _ <- inlineSpace
     level <- length <$> some (is '#')  -- Count the number of '#'
-    _ <- inlineSpace
+    _ <- space
     content <- manyTill freeTextParser newline  -- Consume content until newline
     return $ Header level content
 
@@ -152,13 +128,19 @@ alternativeHeaderParser :: Parser BlockElement
 alternativeHeaderParser = do
     _ <- inlineSpace
     content <- manyTill freeTextParser newline
-    _ <- newline
-    level <- (is '=' >> return 1) <|> (is '-' >> return 2)
-    _ <- manyTill newline eof
-    return $ Header level content
+    nextLine <- manyTill anyChar newline  -- Read the next line
+    case nextLine of
+        '=':_ | all (== '=') nextLine -> do
+            _ <- many (is '=')
+            return $ Header 1 content
+        '-':_ | all (== '-') nextLine -> do
+            _ <- many (is '-')
+            return $ Header 2 content
+        _ -> empty
 
 blockQuoteParser :: Parser BlockElement
 blockQuoteParser = do
+    _ <- inlineSpace
     _ <- is '>'
     _ <- inlineSpace
     firstParagraph <- paragraphElementParser
@@ -166,16 +148,10 @@ blockQuoteParser = do
     restParagraphs <- many (try $ optional blankLines *> is '>' *> inlineSpace *> paragraphElementParser)
     return $ BlockQuote (firstParagraph : restParagraphs)
 
--- -- Parsing blockquotes (> quote)
--- blockQuoteParser :: Parser BlockElement
--- blockQuoteParser = do
---     _ <- is '>'
---     content <- paragraphElementParser
---     return $ BlockQuote [content]
-
 -- Parsing code blocks (```language\ncode```)
 blockCodeParser :: Parser BlockElement
 blockCodeParser = do
+    _ <- inlineSpace
     _ <- string "```"
     language <- optionalPlainText
     code <- manyTill anyChar (try $ string "```")
@@ -197,28 +173,32 @@ footNoteReferenceParser = do
     content <- manyTill anyChar (try (newline <|> eof))
     return (read ref, (String content))
 
--- footNoteReferenceParser :: Parser BlockElement
--- footNoteReferenceParser = do
---     _ <- string "[^"
---     ref <- some digit
---     _ <- string "]:"
---     _ <- inlineSpace
---     content <- plainTextParser 
---     return $ FootNoteReference (read ref) content
-
 -- Ordered list parser (1. item)
 orderedListParser :: Parser BlockElement
 orderedListParser = do
     items <- some orderedListItemParser
     return $ OrderedLists items
 
--- Parsing ordered list items
+-- Parsing ordered list items, with possible nested sublists
 orderedListItemParser :: Parser OrderedListItem
 orderedListItemParser = do
+    -- Parse the main list item
     _ <- some digit
     _ <- string ". "
-    content <- freeTextParser
-    return $ ListItem [content]
+    content <- some freeTextParser -- Handle multiple `FreeText` elements
+    -- Optionally parse a nested sublist
+    sublist <- optional (try orderedSubListParser)
+    return $ ListItem content (maybe [] id sublist)
+
+
+-- Parse nested sublist
+orderedSubListParser :: Parser [OrderedListItem]
+orderedSubListParser = do
+    -- Assumes sublists are indented and items begin with a number and dot
+    _ <- newline
+    indentedItems <- many (string "    ") -- Handle indentation
+    sublistItems <- some orderedListItemParser
+    return sublistItems
 
 -- Table parser (| col1 | col2 |)
 tableParser :: Parser BlockElement
@@ -384,27 +364,15 @@ blockElementToHTML :: Int -> BlockElement -> String
 blockElementToHTML level (Header lvl content) = 
     indent level ++ "<h" ++ show lvl ++ ">" ++ concatMap freeTextToHTML content ++ "</h" ++ show lvl ++ ">"
 blockElementToHTML level (BlockQuote paragraphs) = 
-    -- indent level ++ "<blockquote>\n" ++ concatMap (paragraphToHTML (level + 1)) paragraphs ++ indent level ++ "</blockquote>"
-    indent level ++ "<blockquote>\n" ++
-    concatMap (\p -> paragraphToHTML (level + 1) p ++ "\n") paragraphs ++
-    indent level ++ "</blockquote>"
+    indent level ++ "<blockquote>\n" ++ concatMap (\p -> paragraphToHTML (level + 1) p ++ "\n") paragraphs ++ indent level ++ "</blockquote>"
 blockElementToHTML level (BlockCode (String lang) (String code)) = 
-    concat [
-        indent level,
-        "<pre><code",
-        if null lang then ">" else " class=\"language-" ++ lang ++ "\">",
-        processCode (trimLeadingNewlines code),
-        "</code></pre>"
-    ]
-    -- indent level ++ "<pre><code" ++ (if null lang then ">" else " class=\"language-" ++ lang ++ "\">") ++ 
-    -- concatMap (\line -> indent level ++ line ++ "\n") (lines code) ++
-    -- indent level ++ "</code></pre>"
+    concat [indent level, "<pre><code", if null lang then ">" else " class=\"language-" ++ lang ++ "\">", processCode (trimLeadingNewlines code), "</code></pre>"]
 blockElementToHTML level (FootNoteReference num (String text)) = 
     indent level ++ "<p id=\"fn" ++ show num ++ "\">" ++ text ++ "</p>"
 blockElementToHTML level (FootNoteReferences num) = 
     concatMapSepBy (\(num, content) -> blockElementToHTML level (FootNoteReference num content)) "\n" num
 blockElementToHTML level (OrderedLists items) = 
-    indent level ++ "<ol>\n" ++ concatMap (orderedListItemToHTML (level + 1)) items ++ indent level ++ "</ol>"
+    orderedListToHTML level items
 blockElementToHTML level (Table (TableHeader header) rows) = 
     indent level ++ "<table>\n" ++
     indent (level + 1) ++ "<thead>\n" ++
@@ -416,12 +384,16 @@ blockElementToHTML level (Table (TableHeader header) rows) =
     indent level ++ "</table>"
 blockElementToHTML level (Image (String alt) (String url) (String caption)) = 
     indent level ++ "<img src=\"" ++ url ++ "\" alt=\"" ++ alt ++ "\" title=\"" ++ caption ++ "\">"
-    -- indent level ++ "<img src=\"" ++ url ++ "\" alt=\"" ++ alt ++ (if null caption then "really null?" else " title=\"" ++ caption ++ "\"") ++ ">"
 
--- Convert ordered list items to HTML
+orderedListToHTML :: Int -> [OrderedListItem] -> String
+orderedListToHTML level items = 
+    indent level ++ "<ol>\n" ++ concatMap (orderedListItemToHTML (level + 1)) items ++ indent level ++ "</ol>\n"
+
 orderedListItemToHTML :: Int -> OrderedListItem -> String
-orderedListItemToHTML level (ListItem content) = indent level ++ "<li>" ++ concatMap freeTextToHTML content ++ "</li>\n"
-orderedListItemToHTML level (SubList items) = indent level ++ "<ul>\n" ++ concatMap (orderedListItemToHTML (level + 1)) items ++ indent level ++ "</ul>\n"
+orderedListItemToHTML level (ListItem content sublist) = 
+    if null sublist
+        then indent level ++ "<li>" ++ concatMap freeTextToHTML content ++ "</li>\n"
+        else indent level ++ "<li>" ++ concatMap freeTextToHTML content ++ "</li>\n" ++ indent level ++ "<ol>\n" ++ concatMap (orderedListItemToHTML (level)) sublist ++ indent level ++ "</ol>\n"
 
 -- Convert table header rows to HTML
 headerRowToHTML :: Int -> [TableCell] -> String
@@ -436,16 +408,6 @@ tableCellToHTML :: Int -> TableCell -> String
 tableCellToHTML level (TableCell content) = indent level ++ "<td>" ++ concatMap freeTextToHTML content ++ "</td>"
 
 -------------------- HTML Utility Functions --------------------
-
--- Helper function to get the head of a list or an empty string if the list is empty
-headOrEmpty :: [String] -> String
-headOrEmpty [] = ""
-headOrEmpty (x:_) = x
-
--- Helper function to get the tail of a list or an empty list if the list is empty
-tailOrEmpty :: [String] -> [String]
-tailOrEmpty [] = []
-tailOrEmpty (_:xs) = xs
 
 -- Helper function to process the code
 processCode :: String -> String
@@ -505,23 +467,17 @@ eof = Parser $ \input ->
 digit :: Parser Char
 digit = satisfy isDigit
 
--- Custom between parser
-between :: Parser open -> Parser close -> Parser a -> Parser a
-between open close content = do
-    _ <- open    -- Parse the opening delimiter
-    x <- content -- Parse the content inside
-    _ <- close   -- Parse the closing delimiter
-    return x
-
 -- Helper function to concatenate elements with a separator
 concatMapSepBy :: (a -> String) -> String -> [a] -> String
 concatMapSepBy f sep xs = concat (intersperse sep (map f xs))
 
--- choice :: [Parser a] -> Parser a
--- choice = foldr (<|>) empty
+----------------------------------------------------------------------------
 
-
+writeTextToFile :: String -> IO ()
+writeTextToFile text = do
+    time <- getTime
+    writeFile (time ++ ".html") text
 
 getTime :: IO String
-getTime = formatTime defaultTimeLocale "%Y-%m-%dT%H:%M:%S" <$> getCurrentTime
+getTime = formatTime defaultTimeLocale "%Y-%m-%dT%H.%M.%S" <$> getCurrentTime
 

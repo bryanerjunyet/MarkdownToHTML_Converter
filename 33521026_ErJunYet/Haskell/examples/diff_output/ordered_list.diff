@@ -1,8 +1,8 @@
 diff --git a/examples/expected_output/ordered_list.html b/examples/output/ordered_list.html
-index 0c41095..232e2ea 100644
+index 0c41095..881ac6b 100644
 --- a/examples/expected_output/ordered_list.html
 +++ b/examples/output/ordered_list.html
-@@ -8,16 +8,7 @@
+@@ -8,17 +8,27 @@
  
  <body>
      <ol>
@@ -13,10 +13,27 @@ index 0c41095..232e2ea 100644
 -                <li>Sub Item 3</li>
 -            </ol>
 -        </li>
--        <li><strong>Bolded Item 2</strong></li>
--        <li>Item 3</li>
--        <li>Item 4</li>
 +        <li>Item 1</li>
++        <ol>
++        <li>Sub Item 1</li>
++        <ol>
++        <li>Sub Item 2</li>
++        <ol>
++        <li>Sub Item 3</li>
++        <ol>
+         <li><strong>Bolded Item 2</strong></li>
++        <ol>
+         <li>Item 3</li>
++        <ol>
+         <li>Item 4</li>
++        </ol>
++        </ol>
++        </ol>
++        </ol>
++        </ol>
++        </ol>
      </ol>
++
  </body>
  
+ </html>

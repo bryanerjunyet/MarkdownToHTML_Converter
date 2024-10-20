@@ -4,13 +4,15 @@ module Main (main) where
 
 -- import Assignment (markdownParser)
 
-import           Assignment              (convertADTHTML, markdownParser)
+import           Assignment              (convertADTHTML, markdownParser, writeTextToFile)
 import           Data.Aeson              (object, (.=))
 import           Data.Aeson.Key          (fromString)
 import           Data.Text.Lazy          (Text, pack, unpack)
 import           Data.Text.Lazy.Encoding (decodeUtf8)
 import           Instances               (ParseResult (Result), parse)
 import           Web.Scotty              (ActionM, body, json, post, scotty)
+import           Control.Monad.IO.Class  (liftIO)  -- Import liftIO
+
 
 getResult :: ParseResult a -> (a -> String) -> String
 getResult (Result _ a) f = f a
@@ -35,3 +37,13 @@ main = scotty 3000 $ do
 
     -- Respond with the converted HTML as JSON
     jsonResponse [("html", converted_html)]
+
+  post "/api/saveHTML" $ do
+    requestBody <- body
+    -- Convert the raw request body from ByteString to Text
+    let requestBodyText = decodeUtf8 requestBody
+        -- Convert the Text to String
+        str = unpack requestBodyText
+    -- Write the HTML to a file
+    _ <- liftIO $ writeTextToFile str
+    jsonResponse [("status", "HTML saved")]

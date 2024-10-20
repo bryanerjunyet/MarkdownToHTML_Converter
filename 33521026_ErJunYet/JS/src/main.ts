@@ -19,6 +19,8 @@ const markdownInput = document.getElementById(
     "markdown-input",
 ) as HTMLTextAreaElement;
 const checkbox = document.querySelector('input[name="checkbox"]')!;
+const titleInput = document.getElementById("title-input") as HTMLInputElement;
+const saveBtn = document.getElementById("save-btn")! as HTMLButtonElement;
 
 type Action = (_: State) => State;
 
@@ -46,6 +48,22 @@ const checkboxStream$: Observable<Action> = fromEvent(checkbox, "change").pipe(
     map((value) => (s) => ({ ...s, renderHTML: value })),
 );
 
+const titleInputStream$: Observable<Action> = fromEvent(titleInput, "input").pipe(
+    map((event) => (event.target as HTMLInputElement).value),
+    map((newTitle) => (s) => { 
+        const updatedTitle = newTitle.trim() || "Untitled";
+        const updatedHTML = s.HTML.replace(/<title>(.*?)<\/title>/, `<title>${updatedTitle}</title>`);
+        return ({ ...s, title: updatedTitle, HTML: updatedHTML});
+     }),
+);
+
+const saveBtnStream$: Observable<Action> = fromEvent(saveBtn, "click").pipe(
+    map(() => {
+        console.log('Save button clicked');
+        return (s) => ({ ...s, save: true });
+    })
+);
+
 function getHTML(s: State): Observable<State> {
     // Get the HTML as a stream
     return ajax<{ html: string }>({
@@ -58,9 +76,33 @@ function getHTML(s: State): Observable<State> {
     }).pipe(
         map((response) => response.response), // Extracting the response data
         map((data) => {
+            const updatedHTML = data.html.replace(/<title>(.*?)<\/title>/, `<title>${s.title}</title>`);
             return {
                 ...s,
-                HTML: data.html,
+                HTML: updatedHTML,
+            };
+        }),
+        first(),
+    );
+}
+
+function saveHTML(s: State): Observable<State> {
+    console.log("Saving HTML", s);  
+    const updatedHTML = s.HTML.replace(/<title>(.*?)<\/title>/, `<title>${s.title}</title>`);
+    return ajax({
+        url: "/api/saveHTML",
+        method: "POST",
+        headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: updatedHTML,
+    }).pipe(
+        map((response) => response.response), // Extracting the response data
+        map((data) => {
+            console.log("HTML Saved", data);  
+            return {
+                ...s,
+                save: true,
             };
         }),
         first(),
@@ -72,22 +114,23 @@ const initialState: State = {
     HTML: "",
     renderHTML: true,
     save: false,
+    title: "Untitled",
 };
 
 function main() {
     // Subscribe to the input Observable to listen for changes
-    const subscription = merge(input$, checkboxStream$)
+    const subscription = merge(input$, checkboxStream$, titleInputStream$, saveBtnStream$)
         .pipe(
             map((reducer: Action) => {
                 // Reset Some variables in the state in every tick
-                const newReducer = compose(reducer)(resetState);
+                const newReducer = compose(resetState)(reducer);
                 return newReducer;
             }),
             mergeScan((acc: State, reducer: Action) => {
                 const newState = reducer(acc);
                 // getHTML returns an observable of length one
                 // so we `scan` and merge the result of getHTML in to our stream
-                return getHTML(newState);
+                return newState.save? saveHTML(newState) : getHTML(newState);
             }, initialState),
         )
         .subscribe((value) => {

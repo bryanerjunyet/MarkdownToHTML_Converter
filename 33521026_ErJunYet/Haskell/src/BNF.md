@@ -35,7 +35,7 @@ This document defines the Backus-Naur Form (BNF) for a subset of the Markdown sp
 
 <BlockQuote>        ::= '>' <Paragraph> | <Paragraph> <BlockQuote>
 <BlockCode>         ::= '```' <PlainText> <Newline> '```'
-<FootNoteReference> ::= <FootNote> ':' <PlainText>
+<FootNoteReference> ::= '[^' <Integer> ']' ':' <PlainText>
 
 <OrderedList>       ::= OrderedListItem | <OrderedListItem> <NewLine> <OrderedList>
 <OrderedListItem>   ::= <Integer> '.' <Space> <FreeText> | <Sublist>
