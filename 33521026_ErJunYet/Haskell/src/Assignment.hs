@@ -128,7 +128,7 @@ plainHeaderParser = do
 -- | Parses alternative Markdown headers, like 'Header' followed by '=====' or '-----'
 alternativeHeaderParser :: Parser BlockElement
 alternativeHeaderParser = do
-    _ <- inlineSpace
+    _ <- newline
     content <- manyTill freeTextParser newline
     nextLine <- manyTill anyChar newline  -- Read the next line
     case nextLine of

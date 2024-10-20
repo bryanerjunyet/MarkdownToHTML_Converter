@@ -7,7 +7,7 @@
 
 Alternative Heading 1
 ======
+
 Heading level 2
 ---------------
-
 # **Bolded Heading 1**
